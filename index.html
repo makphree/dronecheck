@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>QuotaZone</title>
+<meta name="description" content="Mappa personale delle zone geografiche UAS sulla posizione del telefono">
+<meta name="theme-color" content="#16384f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <header id="annunciator" class="st-none" aria-live="polite">
+    <div class="ann-row">
+      <div class="ann-main">
+        <div id="annLabel" class="ann-label">Posizione non attiva</div>
+        <div id="annSub" class="ann-sub">Attiva il GPS per sapere in che zona ti trovi</div>
+      </div>
+      <div class="ann-limit" id="annLimitBox" hidden>
+        <div class="ann-limit-k">quota max</div>
+        <div class="ann-limit-v" id="annLimit">—</div>
+      </div>
+    </div>
+    <div class="ann-meta" id="annMeta"></div>
+    <div class="demo-flag" id="demoFlag" hidden>Zone di esempio inventate · importa i dati reali in “Dati”</div>
+  </header>
+
+  <div id="map" role="application" aria-label="Mappa"></div>
+
+  <div class="fab-col">
+    <button class="fab" id="btnGps" aria-label="Attiva o centra la posizione" title="La mia posizione">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 1.5v3.2M12 19.3v3.2M1.5 12h3.2M19.3 12h3.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <button class="fab" id="btnAddHere" aria-label="Salva un punto qui" title="Salva punto">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 6.5v7M8.5 10h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+
+  <section id="sheet" class="collapsed">
+    <nav class="tabs" role="tablist">
+      <button role="tab" class="tab" data-tab="here" aria-selected="true">Qui</button>
+      <button role="tab" class="tab" data-tab="filters" aria-selected="false">Filtri</button>
+      <button role="tab" class="tab" data-tab="points" aria-selected="false">Punti</button>
+      <button role="tab" class="tab" data-tab="data" aria-selected="false">Dati</button>
+      <button class="tab-toggle" id="sheetToggle" aria-label="Espandi o riduci pannello">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </nav>
+
+    <div class="panel" data-panel="here">
+      <div id="hereTarget" class="here-target"></div>
+      <div id="hereList"></div>
+      <h3 class="sec">Zone vicine</h3>
+      <div id="nearList" class="near-list"></div>
+      <p class="fine">Tocca la mappa per ispezionare un punto. Tieni premuto per salvarlo.</p>
+    </div>
+
+    <div class="panel" data-panel="filters" hidden>
+      <h3 class="sec">Colora per</h3>
+      <div class="seg" role="group" aria-label="Colorazione zone">
+        <button type="button" data-mode="quota" aria-pressed="true">Quota max (come D-Flight)</button>
+        <button type="button" data-mode="tipo" aria-pressed="false">Tipo di restrizione</button>
+      </div>
+      <div id="legend" class="legend"></div>
+      <h3 class="sec">Categoria</h3>
+      <div id="fltCat" class="chk-list"></div>
+      <h3 class="sec">Quota massima</h3>
+      <div id="fltBand" class="chk-list"></div>
+      <h3 class="sec">Motivo</h3>
+      <div id="fltReason" class="chips"></div>
+      <h3 class="sec">Visualizzazione</h3>
+      <label class="row-chk"><input type="checkbox" id="fltExpired"> Mostra zone temporanee non attive ora</label>
+      <label class="row-chk"><input type="checkbox" id="optWake"> Schermo sempre acceso</label>
+      <label class="row-chk"><input type="checkbox" id="optFollow" checked> Segui la mia posizione</label>
+      <p class="fine">I filtri cambiano solo la mappa. Gli avvisi in alto considerano sempre tutte le zone.</p>
+    </div>
+
+    <div class="panel" data-panel="points" hidden>
+      <form id="ptForm" class="pt-form" hidden>
+        <div class="pt-form-coords" id="ptFormCoords"></div>
+        <label for="ptName">Nome</label>
+        <input id="ptName" type="text" maxlength="60" required>
+        <label for="ptNote">Nota</label>
+        <input id="ptNote" type="text" maxlength="200" placeholder="es. decollo sul prato, parcheggio lato nord">
+        <div class="btn-row">
+          <button type="submit" class="btn primary">Salva punto</button>
+          <button type="button" class="btn" id="ptCancel">Annulla</button>
+        </div>
+      </form>
+      <div id="ptList"></div>
+      <div class="btn-row">
+        <button class="btn" id="ptExport">Esporta punti</button>
+        <label class="btn" for="ptImportFile">Importa punti</label>
+        <input type="file" id="ptImportFile" accept=".json,application/json" hidden>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="data" hidden>
+      <div id="dataInfo" class="data-info"></div>
+      <div class="btn-row">
+        <label class="btn primary" for="zoneFile">Importa file zone…</label>
+        <input type="file" id="zoneFile" accept=".json,.geojson,.gz,application/json,application/geo+json,application/gzip" hidden>
+      </div>
+      <p class="fine">Formati letti: il file D-Flight così com’è (.json.gz, ED-269), ED-318 e GeoJSON generico. Il file resta sul telefono e funziona anche senza rete.</p>
+      <div class="btn-row">
+        <button class="btn" id="btnDemoHere">Esempio intorno a me</button>
+        <button class="btn" id="btnDemo">Esempio su Firenze</button>
+        <button class="btn danger" id="btnClear">Cancella zone</button>
+      </div>
+      <div id="dataMsg" class="data-msg" role="status"></div>
+      <h3 class="sec">Prima di volare</h3>
+      <p class="fine">QuotaZone è uno strumento personale di consultazione. Non sostituisce la verifica ufficiale su <a href="https://www.d-flight.it" target="_blank" rel="noopener">D-Flight</a>, i NOTAM e le autorizzazioni ENAC. I dati importati valgono alla data del file.</p>
+      <p class="fine">Mappa © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>. Le tessere già viste restano disponibili offline.</p>
+    </div>
+  </section>
+</div>
+
+<script src="vendor/leaflet.js"></script>
+<script src="vendor/turf.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
