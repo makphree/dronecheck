@@ -22,7 +22,7 @@ Nella scheda **Qui**, per la tua posizione o per il punto toccato sulla mappa, l
 - vento, raffiche, vento a 120 m, temperatura, pioggia, visibilità, pressione con tendenza sulle ultime 3 ore (in rialzo, stabile o in calo), indice Kp, alba e tramonto;
 - le prossime 12 ore.
 
-La banda in alto segue la tua posizione GPS oppure il punto toccato sulla mappa (il mirino riporta al GPS). Fuori dalle zone è verde, *Volo libero fino a 120 m*. Se c'è un avviso meteo, la banda si divide: 2/3 per lo stato di volo, 1/3 per il meteo, colorato verde, giallo, arancio o rosso.
+La banda in alto segue la tua posizione GPS oppure il punto toccato sulla mappa (il mirino riporta al GPS). Fuori dalle zone è verde, *Volo libero fino a 120 m*. La banda è divisa: 2/3 per lo stato di volo, 1/3 per il meteo (OK verde, Attenzione giallo, Cautela arancio, No volo rosso). Nel riquadro meteo c'è anche la pressione con la tendenza sulle 3 ore, in un'etichetta colorata: verde se stabile o in rialzo, gialla oltre −2 hPa, arancio oltre −4, rossa oltre −6.
 
 I limiti del drone (vento, raffiche, temperatura) si cambiano nella scheda **Filtri**. Fonti: Open-Meteo (previsioni) e NOAA (indice Kp). Senza rete l'app usa l'ultima previsione scaricata per quel punto, fino a 18 ore.
 

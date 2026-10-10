@@ -906,7 +906,7 @@
     if (o.vis != null) { if (o.vis < 1000) add(3, 'Visibilità ' + Math.round(o.vis) + ' m: impossibile il contatto visivo'); else if (o.vis < 3000) add(1, 'Visibilità ridotta (' + (o.vis / 1000).toFixed(1) + ' km)'); }
     if (o.temp != null) { if (o.temp < lim.tmin) add(2, 'Temperatura ' + Math.round(o.temp) + ' °C: batteria meno efficiente'); if (o.temp > lim.tmax) add(3, 'Temperatura ' + Math.round(o.temp) + ' °C oltre il limite'); }
     if (o.kp != null) { if (o.kp >= 7) add(3, 'Tempesta geomagnetica (Kp ' + o.kp.toFixed(1) + '): GPS e bussola inaffidabili'); else if (o.kp >= 5) add(2, 'Attività geomagnetica alta (Kp ' + o.kp.toFixed(1) + '): GPS meno preciso'); }
-    if (o.dp != null) { if (o.dp <= -4) add(2, 'Pressione in calo rapido (' + o.dp.toFixed(1) + ' hPa in 3 h): probabile peggioramento'); else if (o.dp <= -2) add(1, 'Pressione in calo (' + o.dp.toFixed(1) + ' hPa in 3 h)'); }
+    if (o.dp != null) { if (o.dp <= -6) add(3, 'Pressione in crollo (' + o.dp.toFixed(1) + ' hPa in 3 h): rischio temporali e raffiche'); else if (o.dp <= -4) add(2, 'Pressione in calo rapido (' + o.dp.toFixed(1) + ' hPa in 3 h): probabile peggioramento'); else if (o.dp <= -2) add(1, 'Pressione in calo (' + o.dp.toFixed(1) + ' hPa in 3 h)'); }
     if (o.night) add(1, 'È buio: in volo notturno controlla luci e regole');
     return { level: lv, reasons: rs.sort((a, b) => b.l - a.l) };
   }
@@ -1010,18 +1010,22 @@
     if (!e || !t || wxKey(t.lat, t.lng) !== e.k) { el.hidden = true; box.hidden = true; ann.classList.remove('split'); return; }
     const now = wxNow(e.d, e.t), j = judge(now), L = LV[j.level];
     const vals = 'vento ' + now.wind.toFixed(0) + ' · raff. ' + now.gust.toFixed(0) + ' m/s';
-    if (j.level === 0) {
-      box.hidden = true; ann.classList.remove('split');
-      el.hidden = false;
-      el.innerHTML = '<i style="--d:' + L.col + '"></i>' + L.short + ' · ' + vals;
-      return;
-    }
-    // con un avviso meteo la banda si divide: 2/3 volo, 1/3 meteo
+    // banda divisa: 2/3 volo, 1/3 meteo (verde, giallo, arancio, rosso)
     el.hidden = true; box.hidden = false; ann.classList.add('split');
     box.className = 'ann-wxbox ' + L.cls;
     $('#annWxLabel').textContent = L.band;
-    $('#annWxWhy').textContent = j.reasons[0] ? j.reasons[0].t : '';
+    $('#annWxWhy').textContent = j.reasons[0] ? j.reasons[0].t.replace(/ \(.*?\)/, '') : WMO(now.code) + ', condizioni buone';
     $('#annWxVal').textContent = vals;
+    const pr = $('#annWxPress');
+    if (now.press != null) {
+      const dp = now.dp, pl = dp == null ? 0 : dp <= -6 ? 3 : dp <= -4 ? 2 : dp <= -2 ? 1 : 0;
+      const arrowCh = dp == null ? '' : dp >= 1 ? '↗' : dp <= -1 ? '↘' : '→';
+      const word = dp == null ? '' : dp >= 1 ? 'in rialzo' : dp <= -1 ? 'in calo' : 'stabile';
+      pr.hidden = false;
+      pr.className = 'ann-wxbox-press p' + pl;
+      pr.title = 'Pressione ' + word + (dp != null ? ' nelle ultime 3 ore' : '');
+      pr.innerHTML = Math.round(now.press) + '<span class="u"> hPa</span> ' + arrowCh + (dp != null ? ' ' + (dp > 0 ? '+' : dp < 0 ? '−' : '±') + Math.abs(dp).toFixed(1).replace('.', ',') : '');
+    } else pr.hidden = true;
   }
   let wxTimer = null;
   function updateWx(target, isMe) {
