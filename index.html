@@ -32,6 +32,7 @@
       </div>
     </div>
     <div class="ann-meta" id="annMeta"></div>
+    <div class="ann-wx" id="annWx" hidden></div>
     <div class="demo-flag" id="demoFlag" hidden>Zone di esempio inventate · importa i dati reali in “Dati”</div>
   </header>
 
@@ -60,6 +61,7 @@
     <div class="panel" data-panel="here">
       <div id="hereTarget" class="here-target"></div>
       <div id="hereList"></div>
+      <section id="wxCard" class="wx" aria-live="polite"></section>
       <h3 class="sec">Zone vicine</h3>
       <div id="nearList" class="near-list"></div>
       <p class="fine">Tocca la mappa per ispezionare un punto. Tieni premuto per salvarlo.</p>
@@ -80,6 +82,14 @@
       <div id="fltReason" class="chips"></div>
       <h3 class="sec">Visualizzazione</h3>
       <label class="row-chk"><input type="checkbox" id="fltExpired"> Mostra zone temporanee non attive ora</label>
+      <h3 class="sec">Limiti meteo del drone</h3>
+      <div class="lim-grid">
+        <label for="limWind">Vento max (m/s)</label><input id="limWind" type="number" inputmode="decimal" step="0.5" min="2" max="25">
+        <label for="limGust">Raffiche max (m/s)</label><input id="limGust" type="number" inputmode="decimal" step="0.5" min="2" max="30">
+        <label for="limTmin">Temperatura min (°C)</label><input id="limTmin" type="number" inputmode="decimal" step="1" min="-30" max="20">
+        <label for="limTmax">Temperatura max (°C)</label><input id="limTmax" type="number" inputmode="decimal" step="1" min="20" max="55">
+      </div>
+      <p class="fine">Valori tipici per un drone C0 da 250 g: vento fino a 10 m/s (36 km/h), temperatura 0–40 °C. Controlla il manuale del tuo drone.</p>
       <label class="row-chk"><input type="checkbox" id="optWake"> Schermo sempre acceso</label>
       <label class="row-chk"><input type="checkbox" id="optFollow" checked> Segui la mia posizione</label>
       <p class="fine">I filtri cambiano solo la mappa. Gli avvisi in alto considerano sempre tutte le zone.</p>
@@ -113,13 +123,17 @@
         <label class="btn" for="zoneFile">Importa file a mano…</label>
         <input type="file" id="zoneFile" accept=".json,.geojson,.gz,application/json,application/geo+json,application/gzip" hidden>
       </div>
-      <p class="fine">Le zone arrivano dal sito quando lo script sul Mac pubblica un file nuovo, e restano sul telefono per l’uso senza rete. L’import a mano accetta il file D-Flight (.json.gz, ED-269), ED-318 e GeoJSON.</p>
+      <p class="fine">Le zone arrivano dal sito quando carichi un file nuovo nella cartella data del repository, e restano sul telefono per l’uso senza rete. L’import a mano accetta il file D-Flight (.json.gz, ED-269), ED-318 e GeoJSON.</p>
       <div class="btn-row">
         <button class="btn" id="btnDemoHere">Esempio intorno a me</button>
         <button class="btn" id="btnDemo">Esempio su Firenze</button>
         <button class="btn danger" id="btnClear">Cancella zone</button>
       </div>
       <div id="dataMsg" class="data-msg" role="status"></div>
+      <h3 class="sec">Mappa senza rete</h3>
+      <p class="fine">L’app, le zone e il meteo già scaricato funzionano anche offline. Della mappa restano disponibili solo le parti già viste: prima di partire, inquadra la zona dove voli e salvala.</p>
+      <div class="btn-row"><button class="btn" id="btnTiles">Salva l’area visibile</button></div>
+      <div id="tilesMsg" class="data-msg" role="status"></div>
       <h3 class="sec">Prima di volare</h3>
       <p class="fine">QuotaZone è uno strumento personale di consultazione. Non sostituisce la verifica ufficiale su <a href="https://www.d-flight.it" target="_blank" rel="noopener">D-Flight</a>, i NOTAM e le autorizzazioni ENAC. I dati importati valgono alla data del file.</p>
       <p class="fine">Mappa © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>. Le tessere già viste restano disponibili offline.</p>

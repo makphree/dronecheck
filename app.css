@@ -189,3 +189,28 @@ button, input, label.btn { font: inherit; }
 .msg-full { white-space: pre-line; }
 .zone details.msg summary { color: var(--muted); font-size: .82rem; cursor: pointer; }
 .stale { background: rgba(0,0,0,.28); }
+
+/* Meteo */
+.wx { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
+.wx-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.wx-title { font: 600 .82rem/1.2 var(--font-display); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.wx-age { font-size: .75rem; color: var(--muted); }
+.wx-verdict { font: 700 1.15rem/1.1 var(--font-display); text-transform: uppercase; letter-spacing: .04em; }
+.wx-verdict.go { color: var(--st-free); } .wx-verdict.caution { color: var(--st-auth); } .wx-verdict.nogo { color: var(--st-prohib); }
+.wx-reasons { margin: 0; padding-left: 18px; font-size: .84rem; }
+.wx-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
+.wx-k { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.wx-v { font: 600 1.05rem/1.15 var(--font-display); font-variant-numeric: tabular-nums; }
+.wx-v small { font: 400 .75rem var(--font-body); color: var(--muted); }
+.wx-v.bad { color: var(--st-prohib); } .wx-v.warn { color: var(--st-auth); }
+.wx-arrow { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; }
+.wx-hours { overflow-x: auto; }
+.wx-hours table { border-collapse: collapse; font-size: .78rem; font-variant-numeric: tabular-nums; min-width: 100%; }
+.wx-hours th, .wx-hours td { padding: 3px 6px; text-align: center; white-space: nowrap; }
+.wx-hours th { color: var(--muted); font-weight: 500; }
+.wx-hours td.lbl { text-align: left; color: var(--muted); position: sticky; left: 0; background: var(--surface); }
+.wx-hours td.bad { color: var(--st-prohib); font-weight: 700; } .wx-hours td.warn { color: var(--st-auth); font-weight: 600; }
+.ann-wx { margin-top: 4px; font: 600 .78rem/1.2 var(--font-body); display: inline-flex; gap: 6px; align-items: center; background: rgba(0,0,0,.2); color: #fff; padding: 3px 8px; border-radius: 4px; margin-right: 6px; }
+.ann-wx i { width: 8px; height: 8px; border-radius: 50%; background: var(--d, #fff); display: inline-block; }
+.lim-grid { display: grid; grid-template-columns: 1fr 90px; gap: 6px 10px; align-items: center; font-size: .9rem; }
+.lim-grid input { padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); width: 100%; font: inherit; }

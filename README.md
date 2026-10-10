@@ -14,6 +14,20 @@ Dopo 1–2 minuti il sito si aggiorna. All'apertura, l'app legge l'elenco della 
 
 > Ogni upload aggiunge circa 5 MB alla cronologia del repository, anche se poi cancelli il file. GitHub consiglia di restare sotto 1 GB, cioè circa 6 mesi di upload quotidiani. Per andare oltre c'è la versione automatica (branch `proxmox-auto`), che sostituisce il file senza accumulare cronologia.
 
+## Meteo
+
+Nella scheda **Qui**, per la tua posizione o per il punto toccato sulla mappa, l'app mostra:
+
+- un giudizio: *Meteo adatto al volo*, *Volo con cautela* o *Volo sconsigliato*, con i motivi;
+- vento, raffiche, vento a 120 m, temperatura, pioggia, visibilità, indice Kp, alba e tramonto;
+- le prossime 12 ore.
+
+I limiti del drone (vento, raffiche, temperatura) si cambiano nella scheda **Filtri**. Fonti: Open-Meteo (previsioni) e NOAA (indice Kp). Senza rete l'app usa l'ultima previsione scaricata per quel punto, fino a 18 ore.
+
+## Uso senza rete
+
+App, zone e ultimo meteo restano sul telefono. Della mappa sono disponibili le parti già viste. Prima di partire inquadra la zona di volo e premi **Dati → Salva l'area visibile**: massimo 250 tessere, come chiedono le regole d'uso di OpenStreetMap.
+
 ## Come legge i dati
 
 - **Zone ATM-09:** il limite inferiore è la quota fino alla quale si vola senza autorizzazione. Per esempio `45–120 m AGL` vuol dire libero fino a 45 m.

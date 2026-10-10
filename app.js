@@ -487,12 +487,14 @@
     const t = state.inspect || state.me;
     const target = $('#hereTarget'), list = $('#hereList'), near = $('#nearList');
     if (!t) {
+      updateWx(null);
       target.textContent = '';
       list.innerHTML = '<div class="empty">Attiva la posizione o tocca un punto della mappa.</div>';
       near.innerHTML = '';
       return;
     }
     const isMe = !state.inspect;
+    updateWx(t, isMe);
     target.innerHTML = (isMe ? 'La tua posizione' : esc(state.inspect.label || 'Punto selezionato')) + ' · ' + fmtCoord(t.lat, t.lng) +
       (isMe && t.acc ? ' · ±' + Math.round(t.acc) + ' m' : '') +
       (!isMe ? ' · <button class="link-btn" id="backToMe">torna alla mia posizione</button>' : '');
@@ -521,6 +523,8 @@
     }
     const inside = zonesAt(me.lat, me.lng, false);
     meta.textContent = fmtCoord(me.lat, me.lng) + '  ±' + Math.round(me.acc) + ' m' + (me.alt != null ? '  alt ' + Math.round(me.alt) + ' m s.l.m.' : '');
+    if (!navigator.onLine) meta.textContent += '  ·  senza rete';
+    if (wx.meEntry) renderAnnWx(); else if (!state.inspect) updateWx(me, true);
     if (!state.zones.length) {
       ann.classList.add('st-none'); lab.textContent = 'Nessuna zona caricata'; sub.textContent = 'Importa i dati nella scheda Dati'; lb.hidden = true;
       return;
@@ -832,6 +836,225 @@
     state.zones = []; state.meta = null; await idb.del('dataset').catch(() => {});
     afterDataChange(); alertMsg('Zone cancellate.');
   });
+
+  // ---------------------------------------------------------------- meteo (Open-Meteo + indice Kp NOAA)
+  const WX_TTL = 30 * 60 * 1000, WX_MAX_AGE = 18 * 3600 * 1000;
+  const WMO = c => c === 0 ? 'Sereno' : c <= 1 ? 'Poco nuvoloso' : c === 2 ? 'Parz. nuvoloso' : c === 3 ? 'Coperto'
+    : c <= 48 ? 'Nebbia' : c <= 55 ? 'Pioviggine' : c <= 57 ? 'Pioviggine gelata' : c <= 65 ? 'Pioggia' : c <= 67 ? 'Pioggia gelata'
+    : c <= 77 ? 'Neve' : c <= 82 ? 'Rovesci' : c <= 86 ? 'Rovesci di neve' : c === 95 ? 'Temporale' : 'Temporale con grandine';
+  const LIM_DEF = { wind: 10, gust: 12, tmin: 0, tmax: 40 };
+  const lim = Object.assign({}, LIM_DEF, ls.get('limits', {}));
+  const wx = { key: null, data: null, kp: ls.get('kp', null), busy: false, err: null, forMe: null };
+  const kmh = v => Math.round(v * 3.6);
+  const dirName = d => ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][Math.round(((d % 360) / 45)) % 8];
+  const arrow = d => '<svg class="wx-arrow" viewBox="0 0 16 16" style="transform:rotate(' + (d + 180) + 'deg)" aria-hidden="true"><path d="M8 1l4 9H9v5H7v-5H4z" fill="currentColor"/></svg>';
+  function wxKey(lat, lng) { return lat.toFixed(2) + ',' + lng.toFixed(2); }
+  function wxCacheGet(k) { const c = ls.get('wx', {}); return c[k] || null; }
+  function wxCachePut(k, v) {
+    const c = ls.get('wx', {}); c[k] = v;
+    const keys = Object.keys(c).sort((a, b) => c[b].t - c[a].t); keys.slice(8).forEach(x => delete c[x]);
+    ls.set('wx', c);
+  }
+  async function fetchKp() {
+    if (wx.kp && Date.now() - wx.kp.t < 3 * 3600 * 1000) return;
+    try {
+      const r = await fetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json', { cache: 'no-cache' });
+      const rows = (await r.json()).filter(x => x && x.time_tag && x.kp != null).map(x => ({ t: Date.parse(x.time_tag + 'Z'), kp: +x.kp }));
+      wx.kp = { t: Date.now(), rows }; ls.set('kp', wx.kp);
+    } catch (e) { /* l'indice Kp è un extra: se manca non blocca nulla */ }
+  }
+  function kpAt(ts) {
+    if (!wx.kp || !wx.kp.rows) return null;
+    let best = null;
+    wx.kp.rows.forEach(r => { if (r.t <= ts && (!best || r.t > best.t)) best = r; });
+    return best ? best.kp : null;
+  }
+  async function fetchWx(lat, lng) {
+    const u = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat.toFixed(4) + '&longitude=' + lng.toFixed(4) +
+      '&current=temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,visibility,is_day' +
+      '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_gusts_10m,wind_direction_10m,visibility' +
+      '&daily=sunrise,sunset&wind_speed_unit=ms&timezone=auto&forecast_days=2';
+    const r = await fetch(u, { cache: 'no-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
+  // valuta un'ora: ritorna {level: 0 ok | 1 cautela | 2 sconsigliato, reasons[]}
+  function judge(o) {
+    const rs = []; let lv = 0;
+    const add = (l, t) => { rs.push({ l, t }); lv = Math.max(lv, l); };
+    if (o.wind != null) { if (o.wind > lim.wind) add(2, 'Vento ' + o.wind.toFixed(1) + ' m/s oltre il limite di ' + lim.wind); else if (o.wind > lim.wind * 0.75) add(1, 'Vento ' + o.wind.toFixed(1) + ' m/s vicino al limite'); }
+    if (o.gust != null) { if (o.gust > lim.gust) add(2, 'Raffiche ' + o.gust.toFixed(1) + ' m/s oltre il limite di ' + lim.gust); else if (o.gust > lim.gust * 0.8) add(1, 'Raffiche ' + o.gust.toFixed(1) + ' m/s'); }
+    if (o.w120 != null && o.w120 > lim.wind) add(1, 'A 120 m il vento arriva a ' + o.w120.toFixed(1) + ' m/s: resta più basso');
+    if (o.code != null) { if (o.code >= 95) add(2, 'Temporale'); else if (o.code >= 61 && o.code !== 80) add(2, WMO(o.code)); else if (o.code === 45 || o.code === 48) add(2, 'Nebbia'); else if (o.code >= 51) add(1, WMO(o.code)); }
+    if (o.precip != null && o.precip >= 0.3 && !(o.code >= 61)) add(2, 'Pioggia in corso (' + o.precip.toFixed(1) + ' mm)');
+    if (o.pp != null && o.pp >= 50) add(1, 'Probabilità di pioggia ' + o.pp + '%');
+    if (o.vis != null) { if (o.vis < 1000) add(2, 'Visibilità ' + Math.round(o.vis) + ' m: impossibile il contatto visivo'); else if (o.vis < 3000) add(1, 'Visibilità ridotta (' + (o.vis / 1000).toFixed(1) + ' km)'); }
+    if (o.temp != null) { if (o.temp < lim.tmin) add(1, 'Temperatura ' + Math.round(o.temp) + ' °C: batteria meno efficiente'); if (o.temp > lim.tmax) add(2, 'Temperatura ' + Math.round(o.temp) + ' °C oltre il limite'); }
+    if (o.kp != null) { if (o.kp >= 7) add(2, 'Tempesta geomagnetica (Kp ' + o.kp.toFixed(1) + '): GPS e bussola inaffidabili'); else if (o.kp >= 5) add(1, 'Attività geomagnetica alta (Kp ' + o.kp.toFixed(1) + '): GPS meno preciso'); }
+    if (o.night) add(1, 'È buio: in volo notturno controlla luci e regole');
+    return { level: lv, reasons: rs.sort((a, b) => b.l - a.l) };
+  }
+  const LV = [{ cls: 'go', label: 'Meteo adatto al volo', short: 'Meteo OK', col: 'var(--st-free)' },
+              { cls: 'caution', label: 'Volo con cautela', short: 'Cautela', col: 'var(--st-auth)' },
+              { cls: 'nogo', label: 'Volo sconsigliato', short: 'Sconsigliato', col: 'var(--st-prohib)' }];
+  function hourIndex(d) {
+    const now = d.current ? d.current.time.slice(0, 13) : null;
+    const i = d.hourly.time.findIndex(t => t.slice(0, 13) === now);
+    return i < 0 ? 0 : i;
+  }
+  function isNight(d, iso) {
+    const day = iso.slice(0, 10), i = d.daily.time.indexOf(day);
+    if (i < 0) return false;
+    return iso < d.daily.sunrise[i] || iso > d.daily.sunset[i];
+  }
+  function localHourKey(ts) {
+    const d = new Date(ts), z = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours());
+  }
+  function wxNow(d, fetchedAt) {
+    // dati vecchi (senza rete): usa la previsione dell'ora attuale invece della misura di allora
+    if (fetchedAt && Date.now() - fetchedAt > 60 * 60 * 1000) {
+      const i = d.hourly.time.findIndex(t => t.slice(0, 13) === localHourKey(Date.now()));
+      if (i >= 0) { const o = wxHour(d, i); o.forecast = true; return o; }
+    }
+    const c = d.current, h = d.hourly, i = hourIndex(d);
+    return { wind: c.wind_speed_10m, gust: c.wind_gusts_10m, dir: c.wind_direction_10m, w80: h.wind_speed_80m[i], w120: h.wind_speed_120m[i],
+      temp: c.temperature_2m, code: c.weather_code, precip: c.precipitation, pp: h.precipitation_probability[i], vis: c.visibility != null ? c.visibility : h.visibility[i],
+      cloud: c.cloud_cover, night: c.is_day === 0, kp: kpAt(Date.now()) };
+  }
+  function wxHour(d, i) {
+    const h = d.hourly, t = h.time[i];
+    return { time: t, wind: h.wind_speed_10m[i], gust: h.wind_gusts_10m[i], dir: h.wind_direction_10m[i], w120: h.wind_speed_120m[i], temp: h.temperature_2m[i],
+      code: h.weather_code[i], precip: h.precipitation[i], pp: h.precipitation_probability[i], vis: h.visibility[i], night: isNight(d, t),
+      kp: kpAt(Date.parse(t) || Date.now()) };
+  }
+  function renderWx() {
+    const el = $('#wxCard'); if (!el) return;
+    const e = wx.entry;
+    if (!e) {
+      el.innerHTML = '<div class="wx-head"><span class="wx-title">Meteo</span></div><div class="empty">' +
+        (wx.busy ? 'Scarico le previsioni…' : wx.err ? 'Meteo non disponibile: ' + esc(wx.err) : 'Attiva la posizione o tocca un punto della mappa.') + '</div>';
+      return;
+    }
+    const d = e.d, now = wxNow(d, e.t), j = judge(now), L = LV[j.level];
+    const age = Date.now() - e.t, stale = age > 90 * 60 * 1000;
+    const ageTxt = 'aggiornato ' + new Date(e.t).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + (stale ? ' · ' + Math.max(1, Math.round(age / 3600000)) + ' h fa' + (now.forecast ? ', valori previsti per quest’ora' : '') : '');
+    const cls = (v, w, b) => v == null ? '' : v > b ? 'bad' : v > w ? 'warn' : '';
+    const di = d.daily.time.indexOf(localHourKey(Date.now()).slice(0, 10));
+    const sunset = di >= 0 ? d.daily.sunset[di].slice(11, 16) : '—', sunrise = di >= 0 ? d.daily.sunrise[di].slice(11, 16) : '—';
+    const cell = (k, v, c) => '<div><div class="wx-k">' + k + '</div><div class="wx-v ' + (c || '') + '">' + v + '</div></div>';
+    let html = '<div class="wx-head"><span class="wx-title">Meteo · ' + esc(WMO(now.code)) + '</span><span class="wx-age">' + ageTxt + '</span></div>' +
+      '<div class="wx-verdict ' + L.cls + '">' + L.label + '</div>' +
+      (j.reasons.length ? '<ul class="wx-reasons">' + j.reasons.map(r => '<li>' + esc(r.t) + '</li>').join('') + '</ul>' : '') +
+      '<div class="wx-grid">' +
+      cell('Vento', arrow(now.dir) + ' ' + now.wind.toFixed(1) + ' <small>m/s · ' + kmh(now.wind) + ' km/h ' + dirName(now.dir) + '</small>', cls(now.wind, lim.wind * 0.75, lim.wind)) +
+      cell('Raffiche', now.gust.toFixed(1) + ' <small>m/s · ' + kmh(now.gust) + ' km/h</small>', cls(now.gust, lim.gust * 0.8, lim.gust)) +
+      cell('A 120 m', (now.w120 != null ? now.w120.toFixed(1) : '—') + ' <small>m/s</small>', cls(now.w120, lim.wind * 0.75, lim.wind)) +
+      cell('Temperatura', Math.round(now.temp) + ' <small>°C</small>', now.temp < lim.tmin ? 'warn' : now.temp > lim.tmax ? 'bad' : '') +
+      cell('Pioggia', (now.pp != null ? now.pp + '<small>%</small>' : '—') + ' <small>' + (now.precip || 0).toFixed(1) + ' mm</small>', now.pp >= 50 ? 'warn' : '') +
+      cell('Visibilità', now.vis != null ? (now.vis >= 10000 ? '10+' : (now.vis / 1000).toFixed(1)) + ' <small>km</small>' : '—', now.vis < 1000 ? 'bad' : now.vis < 3000 ? 'warn' : '') +
+      cell('Kp', now.kp != null ? now.kp.toFixed(1) : '—', now.kp >= 7 ? 'bad' : now.kp >= 5 ? 'warn' : '') +
+      cell('Alba', sunrise) + cell('Tramonto', sunset) +
+      '</div>';
+    // prossime ore
+    let i0 = d.hourly.time.findIndex(t => t.slice(0, 13) === localHourKey(Date.now())); if (i0 < 0) i0 = hourIndex(d);
+    const hrs = [];
+    for (let i = i0 + 1; i < Math.min(d.hourly.time.length, i0 + 13); i++) hrs.push(wxHour(d, i));
+    if (hrs.length) {
+      const td = (v, c) => '<td class="' + (c || '') + '">' + v + '</td>';
+      html += '<div class="wx-hours"><table><thead><tr><th></th>' + hrs.map(h => '<th>' + h.time.slice(11, 13) + '</th>').join('') + '</tr></thead><tbody>' +
+        '<tr><td class="lbl">Volo</td>' + hrs.map(h => { const l = judge(h).level; return td(['●', '●', '●'][l], ['', 'warn', 'bad'][l]).replace('<td class="', '<td style="color:' + LV[l].col + '" class="'); }).join('') + '</tr>' +
+        '<tr><td class="lbl">Vento</td>' + hrs.map(h => td(h.wind.toFixed(0), cls(h.wind, lim.wind * 0.75, lim.wind))).join('') + '</tr>' +
+        '<tr><td class="lbl">Raffiche</td>' + hrs.map(h => td(h.gust.toFixed(0), cls(h.gust, lim.gust * 0.8, lim.gust))).join('') + '</tr>' +
+        '<tr><td class="lbl">Pioggia %</td>' + hrs.map(h => td(h.pp != null ? h.pp : '—', h.pp >= 50 ? 'warn' : '')).join('') + '</tr>' +
+        '<tr><td class="lbl">°C</td>' + hrs.map(h => td(Math.round(h.temp))).join('') + '</tr>' +
+        '</tbody></table></div><p class="fine">Vento e raffiche in m/s a 10 m dal suolo. Previsioni Open-Meteo, indice Kp NOAA.</p>';
+    }
+    el.innerHTML = html;
+    renderAnnWx();
+  }
+  function renderAnnWx() {
+    const el = $('#annWx'), e = wx.meEntry;
+    if (!e || !state.me) { el.hidden = true; return; }
+    const now = wxNow(e.d, e.t), L = LV[judge(now).level];
+    el.hidden = false;
+    el.innerHTML = '<i style="--d:' + L.col + '"></i>' + L.short + ' · vento ' + now.wind.toFixed(0) + ' m/s, raffiche ' + now.gust.toFixed(0);
+  }
+  let wxTimer = null;
+  function updateWx(target, isMe) {
+    clearTimeout(wxTimer);
+    wxTimer = setTimeout(() => loadWx(target, isMe), 400);
+  }
+  async function loadWx(t, isMe) {
+    if (!t) { wx.entry = null; renderWx(); return; }
+    const k = wxKey(t.lat, t.lng);
+    let e = wxCacheGet(k);
+    const fresh = e && Date.now() - e.t < WX_TTL;
+    wx.entry = e && Date.now() - e.t < WX_MAX_AGE ? e : null;
+    if (isMe) wx.meEntry = wx.entry;
+    renderWx(); if (isMe) renderAnnWx();
+    if (fresh || wx.busy) return;
+    wx.busy = true; wx.err = null; if (!wx.entry) renderWx();
+    try {
+      const [d] = await Promise.all([fetchWx(t.lat, t.lng), fetchKp()]);
+      e = { t: Date.now(), d }; wxCachePut(k, e);
+      // il punto potrebbe essere cambiato nel frattempo
+      const cur = state.inspect || state.me;
+      if (cur && wxKey(cur.lat, cur.lng) === k) wx.entry = e;
+      if (state.me && wxKey(state.me.lat, state.me.lng) === k) wx.meEntry = e;
+    } catch (err) {
+      wx.err = navigator.onLine ? 'il servizio non risponde' : 'nessuna connessione';
+    } finally { wx.busy = false; renderWx(); renderAnnWx(); }
+  }
+  // limiti modificabili
+  [['limWind', 'wind'], ['limGust', 'gust'], ['limTmin', 'tmin'], ['limTmax', 'tmax']].forEach(([id, k]) => {
+    const inp = $('#' + id); inp.value = lim[k];
+    inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (isFinite(v)) { lim[k] = v; ls.set('limits', lim); renderWx(); renderAnnWx(); } else inp.value = lim[k]; });
+  });
+
+  // ---------------------------------------------------------------- mappa senza rete
+  let baseLayer = osm;
+  map.on('baselayerchange', e => { baseLayer = e.layer; });
+  const MAX_TILES = 250; // limite d'uso delle tessere OpenStreetMap per lo scaricamento anticipato
+  function tilesFor(bounds, z) {
+    const n = Math.pow(2, z), clampY = v => Math.max(0, Math.min(n - 1, v));
+    const x = lng => Math.floor((lng + 180) / 360 * n);
+    const y = lat => { const r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n); };
+    const out = [];
+    for (let i = x(bounds.getWest()); i <= x(bounds.getEast()); i++)
+      for (let j = clampY(y(bounds.getNorth())); j <= clampY(y(bounds.getSouth())); j++) out.push({ x: ((i % n) + n) % n, y: j, z });
+    return out;
+  }
+  $('#btnTiles').addEventListener('click', async () => {
+    const msg = $('#tilesMsg'), btn = $('#btnTiles');
+    if (!navigator.serviceWorker || !navigator.serviceWorker.controller) { msg.textContent = 'Il salvataggio offline sarà disponibile dalla prossima apertura dell’app.'; return; }
+    const b = map.getBounds(), z0 = map.getZoom(), maxZ = baseLayer.options.maxZoom || 19;
+    let list = [];
+    for (let z = Math.max(z0 - 2, 6); z <= Math.min(z0 + 2, maxZ, 17); z++) {
+      const more = tilesFor(b, z);
+      if (list.length + more.length > MAX_TILES) break;
+      list = list.concat(more);
+    }
+    if (!list.length || tilesFor(b, z0).length > MAX_TILES) { msg.textContent = 'Area troppo grande: avvicina la mappa e riprova.'; return; }
+    btn.disabled = true; let done = 0, fail = 0;
+    const url = t => baseLayer.getTileUrl ? L.Util.template(baseLayer._url, Object.assign({ s: 'a', r: '' }, t)) : '';
+    for (let k = 0; k < list.length; k += 4) {
+      await Promise.all(list.slice(k, k + 4).map(t => fetch(url(t), { mode: 'no-cors' }).then(r => (r.ok || r.type === 'opaque') ? done++ : fail++, () => fail++)));
+      msg.textContent = 'Salvo la mappa… ' + done + '/' + list.length;
+    }
+    btn.disabled = false;
+    const zs = list.map(t => t.z); 
+    msg.textContent = fail ? 'Salvate ' + done + ' tessere, ' + fail + ' non scaricate (rete?).' : 'Area salvata: ' + done + ' tessere, zoom da ' + Math.min(...zs) + ' a ' + Math.max(...zs) + '.';
+  });
+  // chiede al browser di non cancellare zone e mappe salvate quando manca spazio
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  function renderNet() {
+    const off = !navigator.onLine;
+    document.documentElement.classList.toggle('offline', off);
+    const m = $('#annMeta'); if (m && off && !/senza rete/.test(m.textContent)) m.textContent = (m.textContent ? m.textContent + '  ·  ' : '') + 'senza rete';
+  }
+  window.addEventListener('online', () => { renderNet(); renderAll(); });
+  window.addEventListener('offline', () => { renderNet(); });
 
   // ---------------------------------------------------------------- aggiornamento dal sito
   // Modo 1 (upload manuale su GitHub): carichi il file D-Flight così com'è nella cartella data/
