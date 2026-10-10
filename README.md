@@ -19,8 +19,10 @@ Dopo 1–2 minuti il sito si aggiorna. All'apertura, l'app legge l'elenco della 
 Nella scheda **Qui**, per la tua posizione o per il punto toccato sulla mappa, l'app mostra:
 
 - un giudizio: *Meteo adatto al volo*, *Volo con cautela* o *Volo sconsigliato*, con i motivi;
-- vento, raffiche, vento a 120 m, temperatura, pioggia, visibilità, indice Kp, alba e tramonto;
+- vento, raffiche, vento a 120 m, temperatura, pioggia, visibilità, pressione con tendenza sulle ultime 3 ore (in rialzo, stabile o in calo), indice Kp, alba e tramonto;
 - le prossime 12 ore.
+
+La banda in alto segue la tua posizione GPS oppure il punto toccato sulla mappa (il mirino riporta al GPS). Fuori dalle zone è verde, *Volo libero fino a 120 m*. Se c'è un avviso meteo, la banda si divide: 2/3 per lo stato di volo, 1/3 per il meteo, colorato verde, giallo, arancio o rosso.
 
 I limiti del drone (vento, raffiche, temperatura) si cambiano nella scheda **Filtri**. Fonti: Open-Meteo (previsioni) e NOAA (indice Kp). Senza rete l'app usa l'ultima previsione scaricata per quel punto, fino a 18 ore.
 

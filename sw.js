@@ -1,5 +1,5 @@
 /* QuotaZone service worker: app offline + tessere mappa già viste */
-const SHELL_CACHE = 'qz-shell-v6';
+const SHELL_CACHE = 'qz-shell-v8';
 const TILE_CACHE = 'qz-tiles-v1';
 const FONT_CACHE = 'qz-fonts-v1';
 const MAX_TILES = 4000;

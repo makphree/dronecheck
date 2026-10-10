@@ -21,19 +21,27 @@
 <body>
 <div id="app">
   <header id="annunciator" class="st-none" aria-live="polite">
-    <div class="ann-row">
-      <div class="ann-main">
-        <div id="annLabel" class="ann-label">Posizione non attiva</div>
-        <div id="annSub" class="ann-sub">Attiva il GPS per sapere in che zona ti trovi</div>
+    <div class="ann-flight">
+      <div class="ann-row">
+        <div class="ann-main">
+          <div id="annLabel" class="ann-label">Posizione non attiva</div>
+          <div id="annSub" class="ann-sub">Attiva il GPS per sapere in che zona ti trovi</div>
+        </div>
+        <div class="ann-limit" id="annLimitBox" hidden>
+          <div class="ann-limit-k">quota max</div>
+          <div class="ann-limit-v" id="annLimit">—</div>
+        </div>
       </div>
-      <div class="ann-limit" id="annLimitBox" hidden>
-        <div class="ann-limit-k">quota max</div>
-        <div class="ann-limit-v" id="annLimit">—</div>
-      </div>
+      <div class="ann-meta" id="annMeta"></div>
+      <div class="ann-wx" id="annWx" hidden></div>
+      <div class="demo-flag" id="demoFlag" hidden>Zone di esempio inventate · importa i dati reali in “Dati”</div>
     </div>
-    <div class="ann-meta" id="annMeta"></div>
-    <div class="ann-wx" id="annWx" hidden></div>
-    <div class="demo-flag" id="demoFlag" hidden>Zone di esempio inventate · importa i dati reali in “Dati”</div>
+    <div class="ann-wxbox" id="annWxBox" hidden>
+      <div class="ann-wxbox-k">Meteo</div>
+      <div class="ann-wxbox-label" id="annWxLabel"></div>
+      <div class="ann-wxbox-why" id="annWxWhy"></div>
+      <div class="ann-wxbox-val" id="annWxVal"></div>
+    </div>
   </header>
 
   <div id="map" role="application" aria-label="Mappa"></div>

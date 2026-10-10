@@ -522,6 +522,7 @@
       lab.textContent = gpsState === 'denied' ? 'Posizione negata' : gpsState === 'waiting' ? 'Cerco il GPS…' : 'Posizione non attiva';
       sub.textContent = gpsState === 'denied' ? 'Consenti la posizione nelle impostazioni del browser' : 'Tocca il pulsante mirino per attivarla';
       lb.hidden = true; meta.textContent = '';
+      $('#annWxBox').hidden = true; $('#annWx').hidden = true;
       return;
     }
     const inside = zonesAt(me.lat, me.lng, false);
@@ -537,15 +538,23 @@
     if (!inside.length) {
       const nz = nearZones(me.lat, me.lng, []);
       const close = nz.find(o => o.d <= Math.max(me.acc, 30));
-      ann.classList.add(close ? 'st-cond' : 'st-clear');
-      lab.textContent = close ? 'Al confine di una zona' : 'Fuori dalle zone note';
-      sub.textContent = nz.length ? 'Più vicina: ' + nz[0].z.name + ' a ' + fmtDist(nz[0].d) : 'Nessuna zona entro ' + fmtDist(NEAR_RADIUS_M);
-      lb.hidden = true;
+      ann.classList.add('st-free');
+      lab.textContent = 'Volo libero fino a 120 m';
+      sub.textContent = close ? 'Attenzione: al confine di ' + nz[0].z.name + ' (' + fmtDist(nz[0].d) + ')'
+        : nz.length ? 'Più vicina: ' + nz[0].z.name + ' a ' + fmtDist(nz[0].d) : 'Nessuna zona entro ' + fmtDist(NEAR_RADIUS_M);
+      lb.hidden = false; lv.textContent = '120 m';
       if (!pick) vibrateOnChange(close ? 1.5 : 0);
       return;
     }
     // inside è già ordinato: prima la zona con la quota massima più bassa
-    const top = inside[0], st = statusOf(top);
+    const top = inside[0], st = statusOf(top), lm = limitMeters(top);
+    if (isFinite(lm) && lm >= 120 && top.restriction !== 'PROHIBITED') {
+      // la zona inizia sopra i 120 m del limite di categoria Open: per un C0 è volo libero
+      ann.classList.add('st-free'); lab.textContent = 'Volo libero fino a 120 m';
+      sub.textContent = top.name + ' inizia a ' + limitLabel(top);
+      lb.hidden = false; lv.textContent = '120 m';
+      renderAnnWx(); return;
+    }
     ann.classList.add('st-' + st.cls);
     lab.textContent = st.cls === 'cond' && top.restriction !== 'CONDITIONAL' ? 'Volo libero fino a ' + limitLabel(top).replace(/ AGL$/, '') : st.label;
     sub.textContent = top.name + (inside.length > 1 ? '  (+' + (inside.length - 1) + ' zone)' : '');
@@ -876,32 +885,35 @@
   }
   async function fetchWx(lat, lng) {
     const u = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat.toFixed(4) + '&longitude=' + lng.toFixed(4) +
-      '&current=temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,visibility,is_day' +
-      '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_gusts_10m,wind_direction_10m,visibility' +
-      '&daily=sunrise,sunset&wind_speed_unit=ms&timezone=auto&forecast_days=2';
+      '&current=temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,visibility,is_day,pressure_msl' +
+      '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_gusts_10m,wind_direction_10m,visibility,pressure_msl' +
+      '&daily=sunrise,sunset&wind_speed_unit=ms&timezone=auto&past_days=1&forecast_days=2';
     const r = await fetch(u, { cache: 'no-cache' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.json();
   }
   // valuta un'ora: ritorna {level: 0 ok | 1 cautela | 2 sconsigliato, reasons[]}
+  // livelli: 0 verde · 1 giallo (attenzione) · 2 arancio (cautela) · 3 rosso (sconsigliato)
   function judge(o) {
     const rs = []; let lv = 0;
     const add = (l, t) => { rs.push({ l, t }); lv = Math.max(lv, l); };
-    if (o.wind != null) { if (o.wind > lim.wind) add(2, 'Vento ' + o.wind.toFixed(1) + ' m/s oltre il limite di ' + lim.wind); else if (o.wind > lim.wind * 0.75) add(1, 'Vento ' + o.wind.toFixed(1) + ' m/s vicino al limite'); }
-    if (o.gust != null) { if (o.gust > lim.gust) add(2, 'Raffiche ' + o.gust.toFixed(1) + ' m/s oltre il limite di ' + lim.gust); else if (o.gust > lim.gust * 0.8) add(1, 'Raffiche ' + o.gust.toFixed(1) + ' m/s'); }
+    if (o.wind != null) { if (o.wind > lim.wind) add(3, 'Vento ' + o.wind.toFixed(1) + ' m/s oltre il limite di ' + lim.wind); else if (o.wind > lim.wind * 0.75) add(2, 'Vento ' + o.wind.toFixed(1) + ' m/s vicino al limite'); }
+    if (o.gust != null) { if (o.gust > lim.gust) add(3, 'Raffiche ' + o.gust.toFixed(1) + ' m/s oltre il limite di ' + lim.gust); else if (o.gust > lim.gust * 0.8) add(2, 'Raffiche ' + o.gust.toFixed(1) + ' m/s'); }
     if (o.w120 != null && o.w120 > lim.wind) add(1, 'A 120 m il vento arriva a ' + o.w120.toFixed(1) + ' m/s: resta più basso');
-    if (o.code != null) { if (o.code >= 95) add(2, 'Temporale'); else if (o.code >= 61 && o.code !== 80) add(2, WMO(o.code)); else if (o.code === 45 || o.code === 48) add(2, 'Nebbia'); else if (o.code >= 51) add(1, WMO(o.code)); }
-    if (o.precip != null && o.precip >= 0.3 && !(o.code >= 61)) add(2, 'Pioggia in corso (' + o.precip.toFixed(1) + ' mm)');
+    if (o.code != null) { if (o.code >= 95) add(3, 'Temporale'); else if (o.code >= 61 && o.code !== 80) add(3, WMO(o.code)); else if (o.code === 45 || o.code === 48) add(3, 'Nebbia'); else if (o.code >= 51) add(1, WMO(o.code)); }
+    if (o.precip != null && o.precip >= 0.3 && !(o.code >= 61)) add(3, 'Pioggia in corso (' + o.precip.toFixed(1) + ' mm)');
     if (o.pp != null && o.pp >= 50) add(1, 'Probabilità di pioggia ' + o.pp + '%');
-    if (o.vis != null) { if (o.vis < 1000) add(2, 'Visibilità ' + Math.round(o.vis) + ' m: impossibile il contatto visivo'); else if (o.vis < 3000) add(1, 'Visibilità ridotta (' + (o.vis / 1000).toFixed(1) + ' km)'); }
-    if (o.temp != null) { if (o.temp < lim.tmin) add(1, 'Temperatura ' + Math.round(o.temp) + ' °C: batteria meno efficiente'); if (o.temp > lim.tmax) add(2, 'Temperatura ' + Math.round(o.temp) + ' °C oltre il limite'); }
-    if (o.kp != null) { if (o.kp >= 7) add(2, 'Tempesta geomagnetica (Kp ' + o.kp.toFixed(1) + '): GPS e bussola inaffidabili'); else if (o.kp >= 5) add(1, 'Attività geomagnetica alta (Kp ' + o.kp.toFixed(1) + '): GPS meno preciso'); }
+    if (o.vis != null) { if (o.vis < 1000) add(3, 'Visibilità ' + Math.round(o.vis) + ' m: impossibile il contatto visivo'); else if (o.vis < 3000) add(1, 'Visibilità ridotta (' + (o.vis / 1000).toFixed(1) + ' km)'); }
+    if (o.temp != null) { if (o.temp < lim.tmin) add(2, 'Temperatura ' + Math.round(o.temp) + ' °C: batteria meno efficiente'); if (o.temp > lim.tmax) add(3, 'Temperatura ' + Math.round(o.temp) + ' °C oltre il limite'); }
+    if (o.kp != null) { if (o.kp >= 7) add(3, 'Tempesta geomagnetica (Kp ' + o.kp.toFixed(1) + '): GPS e bussola inaffidabili'); else if (o.kp >= 5) add(2, 'Attività geomagnetica alta (Kp ' + o.kp.toFixed(1) + '): GPS meno preciso'); }
+    if (o.dp != null) { if (o.dp <= -4) add(2, 'Pressione in calo rapido (' + o.dp.toFixed(1) + ' hPa in 3 h): probabile peggioramento'); else if (o.dp <= -2) add(1, 'Pressione in calo (' + o.dp.toFixed(1) + ' hPa in 3 h)'); }
     if (o.night) add(1, 'È buio: in volo notturno controlla luci e regole');
     return { level: lv, reasons: rs.sort((a, b) => b.l - a.l) };
   }
-  const LV = [{ cls: 'go', label: 'Meteo adatto al volo', short: 'Meteo OK', col: 'var(--st-free)' },
-              { cls: 'caution', label: 'Volo con cautela', short: 'Cautela', col: 'var(--st-auth)' },
-              { cls: 'nogo', label: 'Volo sconsigliato', short: 'Sconsigliato', col: 'var(--st-prohib)' }];
+  const LV = [{ cls: 'go', label: 'Meteo adatto al volo', short: 'Meteo OK', band: 'OK', col: 'var(--st-free)' },
+              { cls: 'watch', label: 'Meteo da tenere d’occhio', short: 'Attenzione', band: 'Attenzione', col: 'var(--st-cond)' },
+              { cls: 'caution', label: 'Volo con cautela', short: 'Cautela', band: 'Cautela', col: 'var(--st-auth)' },
+              { cls: 'nogo', label: 'Volo sconsigliato', short: 'Sconsigliato', band: 'No volo', col: 'var(--st-prohib)' }];
   function hourIndex(d) {
     const now = d.current ? d.current.time.slice(0, 13) : null;
     const i = d.hourly.time.findIndex(t => t.slice(0, 13) === now);
@@ -916,6 +928,13 @@
     const d = new Date(ts), z = n => String(n).padStart(2, '0');
     return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours());
   }
+  // pressure_msl: valore e variazione nelle 3 ore precedenti (hPa)
+  function pressureAt(d, i) {
+    const p = d.hourly.pressure_msl;
+    if (!p || p[i] == null) return { p: null, dp: null };
+    const prev = i >= 3 ? p[i - 3] : null;
+    return { p: p[i], dp: prev != null ? p[i] - prev : null };
+  }
   function wxNow(d, fetchedAt) {
     // dati vecchi (senza rete): usa la previsione dell'ora attuale invece della misura di allora
     if (fetchedAt && Date.now() - fetchedAt > 60 * 60 * 1000) {
@@ -925,13 +944,19 @@
     const c = d.current, h = d.hourly, i = hourIndex(d);
     return { wind: c.wind_speed_10m, gust: c.wind_gusts_10m, dir: c.wind_direction_10m, w80: h.wind_speed_80m[i], w120: h.wind_speed_120m[i],
       temp: c.temperature_2m, code: c.weather_code, precip: c.precipitation, pp: h.precipitation_probability[i], vis: c.visibility != null ? c.visibility : h.visibility[i],
-      cloud: c.cloud_cover, night: c.is_day === 0, kp: kpAt(Date.now()) };
+      cloud: c.cloud_cover, night: c.is_day === 0, kp: kpAt(Date.now()),
+      press: c.pressure_msl != null ? c.pressure_msl : pressureAt(d, i).p, dp: pressureAt(d, i).dp };
   }
   function wxHour(d, i) {
     const h = d.hourly, t = h.time[i];
     return { time: t, wind: h.wind_speed_10m[i], gust: h.wind_gusts_10m[i], dir: h.wind_direction_10m[i], w120: h.wind_speed_120m[i], temp: h.temperature_2m[i],
       code: h.weather_code[i], precip: h.precipitation[i], pp: h.precipitation_probability[i], vis: h.visibility[i], night: isNight(d, t),
-      kp: kpAt(Date.parse(t) || Date.now()) };
+      kp: kpAt(Date.parse(t) || Date.now()), press: pressureAt(d, i).p, dp: pressureAt(d, i).dp };
+  }
+  function trendTxt(dp) {
+    if (dp == null) return '';
+    const v = (dp > 0 ? '+' : dp < 0 ? '−' : '±') + Math.abs(dp).toFixed(1);
+    return (dp >= 1 ? '↗ in rialzo ' : dp <= -1 ? '↘ in calo ' : '→ stabile ') + v + ' in 3 h';
   }
   function renderWx() {
     const el = $('#wxCard'); if (!el) return;
@@ -958,6 +983,7 @@
       cell('Temperatura', Math.round(now.temp) + ' <small>°C</small>', now.temp < lim.tmin ? 'warn' : now.temp > lim.tmax ? 'bad' : '') +
       cell('Pioggia', (now.pp != null ? now.pp + '<small>%</small>' : '—') + ' <small>' + (now.precip || 0).toFixed(1) + ' mm</small>', now.pp >= 50 ? 'warn' : '') +
       cell('Visibilità', now.vis != null ? (now.vis >= 10000 ? '10+' : (now.vis / 1000).toFixed(1)) + ' <small>km</small>' : '—', now.vis < 1000 ? 'bad' : now.vis < 3000 ? 'warn' : '') +
+      cell('Pressione', now.press != null ? Math.round(now.press) + ' <small>hPa ' + trendTxt(now.dp) + '</small>' : '—', now.dp != null && now.dp <= -4 ? 'warn' : '') +
       cell('Kp', now.kp != null ? now.kp.toFixed(1) : '—', now.kp >= 7 ? 'bad' : now.kp >= 5 ? 'warn' : '') +
       cell('Alba', sunrise) + cell('Tramonto', sunset) +
       '</div>';
@@ -968,22 +994,34 @@
     if (hrs.length) {
       const td = (v, c) => '<td class="' + (c || '') + '">' + v + '</td>';
       html += '<div class="wx-hours"><table><thead><tr><th></th>' + hrs.map(h => '<th>' + h.time.slice(11, 13) + '</th>').join('') + '</tr></thead><tbody>' +
-        '<tr><td class="lbl">Volo</td>' + hrs.map(h => { const l = judge(h).level; return td(['●', '●', '●'][l], ['', 'warn', 'bad'][l]).replace('<td class="', '<td style="color:' + LV[l].col + '" class="'); }).join('') + '</tr>' +
+        '<tr><td class="lbl">Volo</td>' + hrs.map(h => { const l = judge(h).level; return td('●', ['', '', 'warn', 'bad'][l]).replace('<td class="', '<td style="color:' + LV[l].col + '" class="'); }).join('') + '</tr>' +
         '<tr><td class="lbl">Vento</td>' + hrs.map(h => td(h.wind.toFixed(0), cls(h.wind, lim.wind * 0.75, lim.wind))).join('') + '</tr>' +
         '<tr><td class="lbl">Raffiche</td>' + hrs.map(h => td(h.gust.toFixed(0), cls(h.gust, lim.gust * 0.8, lim.gust))).join('') + '</tr>' +
         '<tr><td class="lbl">Pioggia %</td>' + hrs.map(h => td(h.pp != null ? h.pp : '—', h.pp >= 50 ? 'warn' : '')).join('') + '</tr>' +
+        '<tr><td class="lbl">hPa</td>' + hrs.map(h => td(h.press != null ? Math.round(h.press) : '—', h.dp != null && h.dp <= -4 ? 'warn' : '')).join('') + '</tr>' +
         '<tr><td class="lbl">°C</td>' + hrs.map(h => td(Math.round(h.temp))).join('') + '</tr>' +
-        '</tbody></table></div><p class="fine">Vento e raffiche in m/s a 10 m dal suolo. Previsioni Open-Meteo, indice Kp NOAA.</p>';
+        '</tbody></table></div><p class="fine">Vento e raffiche in m/s a 10 m dal suolo; pressione al livello del mare, tendenza sulle 3 ore precedenti. Previsioni Open-Meteo, indice Kp NOAA.</p>';
     }
     el.innerHTML = html;
     renderAnnWx();
   }
   function renderAnnWx() {
-    const el = $('#annWx'), e = wx.entry, t = state.inspect || state.me;
-    if (!e || !t || wxKey(t.lat, t.lng) !== e.k) { el.hidden = true; return; }
-    const now = wxNow(e.d, e.t), L = LV[judge(now).level];
-    el.hidden = false;
-    el.innerHTML = '<i style="--d:' + L.col + '"></i>' + L.short + ' · vento ' + now.wind.toFixed(0) + ' m/s, raffiche ' + now.gust.toFixed(0);
+    const el = $('#annWx'), box = $('#annWxBox'), ann = $('#annunciator'), e = wx.entry, t = state.inspect || state.me;
+    if (!e || !t || wxKey(t.lat, t.lng) !== e.k) { el.hidden = true; box.hidden = true; ann.classList.remove('split'); return; }
+    const now = wxNow(e.d, e.t), j = judge(now), L = LV[j.level];
+    const vals = 'vento ' + now.wind.toFixed(0) + ' · raff. ' + now.gust.toFixed(0) + ' m/s';
+    if (j.level === 0) {
+      box.hidden = true; ann.classList.remove('split');
+      el.hidden = false;
+      el.innerHTML = '<i style="--d:' + L.col + '"></i>' + L.short + ' · ' + vals;
+      return;
+    }
+    // con un avviso meteo la banda si divide: 2/3 volo, 1/3 meteo
+    el.hidden = true; box.hidden = false; ann.classList.add('split');
+    box.className = 'ann-wxbox ' + L.cls;
+    $('#annWxLabel').textContent = L.band;
+    $('#annWxWhy').textContent = j.reasons[0] ? j.reasons[0].t : '';
+    $('#annWxVal').textContent = vals;
   }
   let wxTimer = null;
   function updateWx(target, isMe) {
