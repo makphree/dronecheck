@@ -745,7 +745,7 @@
 
   // ---------------------------------------------------------------- dati zone
   function alertMsg(t, err) { const m = $('#dataMsg'); m.textContent = t; m.classList.toggle('err', !!err); }
-  const STALE_DAYS = 7;
+  const STALE_DAYS = 3;
   function dataAgeDays() {
     const m = state.meta; if (!m || m.demo) return 0;
     const t = Date.parse(m.dataDate || m.imported);
@@ -782,14 +782,15 @@
     } else text = await blob.text();
     try { return JSON.parse(text); } catch (e) { throw new Error('Il file non è un JSON valido.'); }
   }
-  async function loadDataset(data, fileName, blob, savedMeta) {
+  async function loadDataset(data, fileName, blob, savedMeta, extra) {
     const res = parseAny(data);
     if (!res.zones.length) throw new Error('Il file non contiene zone leggibili.');
     const title = textOf(data.title || data.name) || fileName || 'Zone importate';
     state.zones = res.zones;
     polyCache.clear();
     state.meta = { title, format: res.format, skipped: res.skipped, imported: savedMeta ? savedMeta.imported : new Date().toISOString(),
-      dataDate: dateFromTitle(title), file: fileName || '', demo: !!data.demo };
+      dataDate: dateFromTitle(title), file: fileName || '', demo: !!data.demo,
+      source: (savedMeta || extra || {}).source || 'file', remoteSha: (savedMeta || extra || {}).remoteSha || null };
     if (!savedMeta) {
       const toSave = blob || new Blob([JSON.stringify(data)], { type: 'application/json' });
       await idb.set('dataset', { blob: toSave, fileName, meta: state.meta }).catch(() => alertMsg('Zone caricate, ma il telefono non ha spazio per salvarle offline.', true));
@@ -832,6 +833,92 @@
     afterDataChange(); alertMsg('Zone cancellate.');
   });
 
+  // ---------------------------------------------------------------- aggiornamento dal sito
+  // Modo 1 (upload manuale su GitHub): carichi il file D-Flight così com'è nella cartella data/
+  //   del repository; l'app trova il più recente tramite l'elenco pubblico dell'API di GitHub.
+  // Modo 2 (script/Proxmox): data/zone.json descrive data/zones.json.gz.
+  const MANIFEST_URL = 'data/zone.json', DATA_URL = 'data/zones.json.gz';
+  const FILE_RE = /^dflight_geozones_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.json(\.gz)?$/;
+  function ghRepo() {
+    const m = /^([^.]+)\.github\.io$/i.exec(location.hostname);
+    if (!m) return null;
+    const first = location.pathname.split('/').filter(Boolean)[0];
+    return { owner: m[1], repo: first && !/\.html?$/.test(first) ? first : m[1] + '.github.io' };
+  }
+  async function findRemote() {
+    const gh = ghRepo();
+    if (gh) {
+      try {
+        const r = await fetch('https://api.github.com/repos/' + gh.owner + '/' + gh.repo + '/contents/data', { cache: 'no-cache', headers: { Accept: 'application/vnd.github+json' } });
+        if (r.ok) {
+          const list = (await r.json()).filter(f => f.type === 'file' && FILE_RE.test(f.name)).sort((x, y) => x.name < y.name ? 1 : -1);
+          if (list.length) {
+            const f = list[0], m = FILE_RE.exec(f.name);
+            return { file: f.name, url: 'data/' + encodeURIComponent(f.name), altUrl: f.download_url, sha256: 'git:' + f.sha,
+              dataDate: new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).toISOString(), older: list.length - 1 };
+          }
+        }
+      } catch (e) { if (!navigator.onLine) throw e; }
+    }
+    const r = await fetch(MANIFEST_URL, { cache: 'no-cache' });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const man = await r.json();
+    return Object.assign({ url: DATA_URL + '?v=' + encodeURIComponent(String(man.sha256 || man.dataDate || '').slice(0, 16)) }, man);
+  }
+  const sync = { state: 'idle', man: null, checked: ls.get('lastCheck', 0), busy: false };
+  function renderSync() {
+    const el = $('#syncInfo'); if (!el) return;
+    const t = sync.checked ? new Date(sync.checked).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : 'mai';
+    const man = sync.man;
+    const pub = man && man.dataDate ? new Date(man.dataDate).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '';
+    const msg = {
+      idle: 'Aggiornamento automatico dal sito.',
+      checking: 'Controllo se ci sono zone nuove…',
+      downloading: 'Scarico le zone del ' + pub + '…',
+      ok: 'Zone aggiornate: sul sito ci sono i dati del ' + pub + '.',
+      updated: 'Scaricate le zone nuove del ' + pub + '.',
+      none: 'Nel repository non c’è ancora un file dflight_geozones_….json.gz nella cartella data.',
+      offline: 'Nessuna connessione: uso le zone salvate sul telefono.',
+      error: 'Non riesco a scaricare le zone dal sito. Riprovo alla prossima apertura.',
+      localNewer: 'Hai importato a mano dati più recenti di quelli sul sito (' + pub + ').'
+    }[sync.state] || '';
+    el.textContent = msg + (sync.state === 'checking' || sync.state === 'downloading' ? '' : ' Ultimo controllo: ' + t + '.');
+    el.classList.toggle('err', sync.state === 'error');
+  }
+  async function syncRemote(force) {
+    if (sync.busy || location.protocol === 'file:') return false;
+    sync.busy = true; sync.state = 'checking'; renderSync();
+    try {
+      let man;
+      try { man = await findRemote(); }
+      catch (e) { sync.state = navigator.onLine ? 'error' : 'offline'; return false; }
+      if (!man) { sync.state = 'none'; sync.checked = Date.now(); return false; }
+      sync.man = man; sync.checked = Date.now(); ls.set('lastCheck', sync.checked);
+      const cur = state.meta;
+      if (!force && cur && cur.remoteSha && cur.remoteSha === man.sha256) { sync.state = 'ok'; return false; }
+      if (!force && cur && !cur.demo && cur.source === 'file' && cur.dataDate && man.dataDate && Date.parse(cur.dataDate) > Date.parse(man.dataDate)) { sync.state = 'localNewer'; return false; }
+      sync.state = 'downloading'; renderSync();
+      let d = await fetch(man.url, { cache: 'no-cache' }).catch(() => null);
+      // appena caricato su GitHub il sito può metterci 1–2 minuti: nel frattempo uso il file grezzo
+      if ((!d || !d.ok) && man.altUrl) d = await fetch(man.altUrl, { cache: 'no-cache' });
+      if (!d || !d.ok) throw new Error('HTTP ' + (d ? d.status : '?'));
+      const blob = await d.blob();
+      const data = await readZoneBlob(blob);
+      await loadDataset(data, man.file || 'zones.json.gz', blob, null, { source: 'sito', remoteSha: man.sha256 || null });
+      sync.state = 'updated';
+      return true;
+    } catch (e) {
+      sync.state = 'error'; return false;
+    } finally { sync.busy = false; renderSync(); }
+  }
+  $('#btnSync').addEventListener('click', () => syncRemote(false));
+  // l'app installata può restare aperta per giorni: ricontrolla quando torna in primo piano
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - sync.checked > 30 * 60 * 1000) syncRemote(false);
+  });
+  window.addEventListener('online', () => { if (Date.now() - sync.checked > 5 * 60 * 1000) syncRemote(false); });
+
   // ---------------------------------------------------------------- avvio
   async function boot() {
     $('#optFollow').checked = state.follow;
@@ -844,9 +931,13 @@
         const data = saved.blob ? await readZoneBlob(saved.blob) : saved.data;
         await loadDataset(data, saved.fileName, null, saved.meta || { imported: new Date().toISOString() });
         ok = true;
-      } catch (e) { alertMsg('Non riesco a rileggere le zone salvate: importa di nuovo il file.', true); }
+      } catch (e) { alertMsg('Non riesco a rileggere le zone salvate.', true); }
     }
-    if (!ok) await loadDataset(demoDataset(43.7696, 11.2558, 'su Firenze'), '');
+    // prima apertura: prova subito il sito, altrimenti mostra l'esempio
+    if (!ok) ok = await syncRemote(false);
+    if (!ok && !state.meta) await loadDataset(demoDataset(43.7696, 11.2558, 'su Firenze'), '');
+    else if (ok !== true || sync.state !== 'updated') syncRemote(false);
+    renderSync();
     const p2 = await idb.get('points');
     if ((!state.points || !state.points.length) && p2 && p2.length) { state.points = p2; ls.set('points', p2); }
     drawPoints(); renderPoints();
@@ -861,5 +952,5 @@
   }
 
   // per i test
-  window.QZ = { state, parseAny, zonesAt, nearZones, loadDataset, readZoneBlob, statusOf };
+  window.QZ = { state, parseAny, zonesAt, nearZones, loadDataset, readZoneBlob, statusOf, syncRemote, sync };
 })();

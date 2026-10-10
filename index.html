@@ -107,11 +107,13 @@
 
     <div class="panel" data-panel="data" hidden>
       <div id="dataInfo" class="data-info"></div>
+      <div id="syncInfo" class="data-msg" role="status"></div>
       <div class="btn-row">
-        <label class="btn primary" for="zoneFile">Importa file zone…</label>
+        <button class="btn primary" id="btnSync">Controlla aggiornamenti</button>
+        <label class="btn" for="zoneFile">Importa file a mano…</label>
         <input type="file" id="zoneFile" accept=".json,.geojson,.gz,application/json,application/geo+json,application/gzip" hidden>
       </div>
-      <p class="fine">Formati letti: il file D-Flight così com’è (.json.gz, ED-269), ED-318 e GeoJSON generico. Il file resta sul telefono e funziona anche senza rete.</p>
+      <p class="fine">Le zone arrivano dal sito quando lo script sul Mac pubblica un file nuovo, e restano sul telefono per l’uso senza rete. L’import a mano accetta il file D-Flight (.json.gz, ED-269), ED-318 e GeoJSON.</p>
       <div class="btn-row">
         <button class="btn" id="btnDemoHere">Esempio intorno a me</button>
         <button class="btn" id="btnDemo">Esempio su Firenze</button>

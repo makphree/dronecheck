@@ -1,5 +1,5 @@
 /* QuotaZone service worker: app offline + tessere mappa già viste */
-const SHELL_CACHE = 'qz-shell-v2';
+const SHELL_CACHE = 'qz-shell-v4';
 const TILE_CACHE = 'qz-tiles-v1';
 const FONT_CACHE = 'qz-fonts-v1';
 const MAX_TILES = 4000;
@@ -56,6 +56,9 @@ self.addEventListener('fetch', e => {
     }));
     return;
   }
+
+  // Zone: le gestisce l'app (salvate in IndexedDB), qui niente cache
+  if (url.origin === self.location.origin && /\/data\//.test(url.pathname)) return;
 
   // App: rete se c'è (per avere gli aggiornamenti), altrimenti cache
   if (url.origin === self.location.origin) {
