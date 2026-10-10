@@ -214,3 +214,5 @@ button, input, label.btn { font: inherit; }
 .ann-wx i { width: 8px; height: 8px; border-radius: 50%; background: var(--d, #fff); display: inline-block; }
 .lim-grid { display: grid; grid-template-columns: 1fr 90px; gap: 6px 10px; align-items: center; font-size: .9rem; }
 .lim-grid input { padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); width: 100%; font: inherit; }
+#annunciator.picked .ann-meta { opacity: 1; font-weight: 600; }
+#annunciator.picked::after { content: ""; display: block; height: 3px; margin: 8px -16px -10px; background: repeating-linear-gradient(90deg, currentColor 0 10px, transparent 10px 18px); opacity: .55; }

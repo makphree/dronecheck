@@ -512,8 +512,11 @@
 
   function renderAnnunciator() {
     const ann = $('#annunciator'), lab = $('#annLabel'), sub = $('#annSub'), meta = $('#annMeta'), lb = $('#annLimitBox'), lv = $('#annLimit');
-    const me = state.me;
+    // la banda segue il punto selezionato sulla mappa; senza selezione segue il GPS
+    const pick = state.inspect;
+    const me = pick ? { lat: pick.lat, lng: pick.lng, acc: null, alt: null } : state.me;
     ann.className = '';
+    ann.classList.toggle('picked', !!pick);
     if (!me) {
       ann.classList.add('st-none');
       lab.textContent = gpsState === 'denied' ? 'Posizione negata' : gpsState === 'waiting' ? 'Cerco il GPS…' : 'Posizione non attiva';
@@ -522,9 +525,11 @@
       return;
     }
     const inside = zonesAt(me.lat, me.lng, false);
-    meta.textContent = fmtCoord(me.lat, me.lng) + '  ±' + Math.round(me.acc) + ' m' + (me.alt != null ? '  alt ' + Math.round(me.alt) + ' m s.l.m.' : '');
+    meta.textContent = pick
+      ? (pick.label ? pick.label + ' · ' : 'Punto selezionato · ') + fmtCoord(me.lat, me.lng) + '  ·  mirino = torna al GPS'
+      : fmtCoord(me.lat, me.lng) + '  ±' + Math.round(me.acc) + ' m' + (me.alt != null ? '  alt ' + Math.round(me.alt) + ' m s.l.m.' : '');
     if (!navigator.onLine) meta.textContent += '  ·  senza rete';
-    if (wx.meEntry) renderAnnWx(); else if (!state.inspect) updateWx(me, true);
+    renderAnnWx();
     if (!state.zones.length) {
       ann.classList.add('st-none'); lab.textContent = 'Nessuna zona caricata'; sub.textContent = 'Importa i dati nella scheda Dati'; lb.hidden = true;
       return;
@@ -536,7 +541,7 @@
       lab.textContent = close ? 'Al confine di una zona' : 'Fuori dalle zone note';
       sub.textContent = nz.length ? 'Più vicina: ' + nz[0].z.name + ' a ' + fmtDist(nz[0].d) : 'Nessuna zona entro ' + fmtDist(NEAR_RADIUS_M);
       lb.hidden = true;
-      vibrateOnChange(close ? 1.5 : 0);
+      if (!pick) vibrateOnChange(close ? 1.5 : 0);
       return;
     }
     // inside è già ordinato: prima la zona con la quota massima più bassa
@@ -546,7 +551,7 @@
     sub.textContent = top.name + (inside.length > 1 ? '  (+' + (inside.length - 1) + ' zone)' : '');
     const lbl = limitLabel(top);
     lb.hidden = lbl === '—'; lv.textContent = lbl;
-    vibrateOnChange(SEVERITY[st.cls] || 2);
+    if (!pick) vibrateOnChange(SEVERITY[st.cls] || 2);
   }
   const SEVERITY = { prohib: 4, auth: 3, unknown: 2.5, cond: 2, free: 1 };
   function vibrateOnChange(rank) {
@@ -562,13 +567,13 @@
     if (inspectMarker) inspectMarker.remove();
     inspectMarker = L.marker([lat, lng], { interactive: false, icon: L.divIcon({ className: '', html: '<div class="inspect-pin"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }) }).addTo(map);
     selectTab('here'); openSheet(true);
-    renderHere();
+    renderHere(); renderAnnunciator();
     requestAnimationFrame(() => panVisible(L.latLng(lat, lng)));
   }
   function clearInspect() {
     state.inspect = null;
     if (inspectMarker) { inspectMarker.remove(); inspectMarker = null; }
-    renderHere();
+    renderHere(); renderAnnunciator();
     if (state.me) panVisible(L.latLng(state.me.lat, state.me.lng), true);
   }
   map.on('click', e => inspectAt(e.latlng.lat, e.latlng.lng));
@@ -974,8 +979,8 @@
     renderAnnWx();
   }
   function renderAnnWx() {
-    const el = $('#annWx'), e = wx.meEntry;
-    if (!e || !state.me) { el.hidden = true; return; }
+    const el = $('#annWx'), e = wx.entry, t = state.inspect || state.me;
+    if (!e || !t || wxKey(t.lat, t.lng) !== e.k) { el.hidden = true; return; }
     const now = wxNow(e.d, e.t), L = LV[judge(now).level];
     el.hidden = false;
     el.innerHTML = '<i style="--d:' + L.col + '"></i>' + L.short + ' · vento ' + now.wind.toFixed(0) + ' m/s, raffiche ' + now.gust.toFixed(0);
@@ -988,7 +993,7 @@
   async function loadWx(t, isMe) {
     if (!t) { wx.entry = null; renderWx(); return; }
     const k = wxKey(t.lat, t.lng);
-    let e = wxCacheGet(k);
+    let e = wxCacheGet(k); if (e) e.k = k;
     const fresh = e && Date.now() - e.t < WX_TTL;
     wx.entry = e && Date.now() - e.t < WX_MAX_AGE ? e : null;
     if (isMe) wx.meEntry = wx.entry;
@@ -997,7 +1002,7 @@
     wx.busy = true; wx.err = null; if (!wx.entry) renderWx();
     try {
       const [d] = await Promise.all([fetchWx(t.lat, t.lng), fetchKp()]);
-      e = { t: Date.now(), d }; wxCachePut(k, e);
+      e = { t: Date.now(), d, k }; wxCachePut(k, e);
       // il punto potrebbe essere cambiato nel frattempo
       const cur = state.inspect || state.me;
       if (cur && wxKey(cur.lat, cur.lng) === k) wx.entry = e;
